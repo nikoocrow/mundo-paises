@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Explora el mundo · Globo 3D</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <!--
+      Estilos mínimos para cuando se abre este archivo directamente (doble clic / file://).
+      Los estilos reales (src/styles/main.css) los carga Vite desde src/main.js, así que sin
+      `npm run dev` la página saldría sin estilos. Este aviso se oculta solo cuando Vite carga main.css.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: radial-gradient(ellipse at 50% 45%, #0d1f3f 0%, #071228 45%, #030812 100%);
+        color: #e8f1ff;
+        font-family: 'Space Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      }
+      .run-notice {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: grid;
+        place-items: center;
+        padding: 16px;
+        background: radial-gradient(ellipse at 50% 45%, #0d1f3f 0%, #071228 45%, #030812 100%);
+        box-sizing: border-box;
+      }
+      .run-notice__card {
+        width: min(460px, 100%);
+        padding: 28px;
+        border: 1px solid rgba(140, 200, 255, 0.16);
+        border-radius: 18px;
+        background: rgba(10, 22, 46, 0.62);
+        backdrop-filter: blur(14px);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+        box-sizing: border-box;
+      }
+      .run-notice__badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: rgba(108, 196, 255, 0.14);
+        color: #6cc4ff;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .run-notice h2 {
+        margin: 14px 0 8px;
+        font-size: 24px;
+        font-weight: 700;
+      }
+      .run-notice p {
+        margin: 0 0 18px;
+        color: #8ea6c8;
+        line-height: 1.5;
+      }
+      .run-notice ol {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: step;
+        display: grid;
+        gap: 10px;
+      }
+      .run-notice li {
+        counter-increment: step;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #8ea6c8;
+        font-size: 14px;
+      }
+      .run-notice li::before {
+        content: counter(step);
+        flex: none;
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: #6cc4ff;
+        color: #030812;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .run-notice code {
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: #030812;
+        border: 1px solid rgba(140, 200, 255, 0.16);
+        color: #ffb347;
+        font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+        font-size: 13px;
+      }
+      .run-notice__foot {
+        margin: 18px 0 0 !important;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Aviso visible solo si se abre sin Vite (main.css lo oculta) -->
+    <div class="run-notice" id="run-notice">
+      <div class="run-notice__card">
+        <span class="run-notice__badge">Proyecto Vite</span>
+        <h2>Explora el mundo · Globo 3D</h2>
+        <p>Este proyecto usa Vite y no funciona abriendo el <strong>index.html</strong> directamente. Ejecútalo así desde la carpeta del proyecto:</p>
+        <ol>
+          <li><code>npm i</code> instala las dependencias</li>
+          <li><code>npm run dev</code> arranca el servidor</li>
+          <li>Abre <code>http://localhost:5173</code></li>
+        </ol>
+        <p class="run-notice__foot">Necesitas Node.js 20.19+ o 22.12+.</p>
+      </div>
+    </div>
+
+    <canvas class="webgl"></canvas>
+
+    <!-- Loader -->
+    <div class="loader" id="loader">
+      <div class="loader__ring"></div>
+      <p class="loader__text">Cargando planeta <span id="loader-pct">0%</span></p>
+    </div>
+
+    <!-- Header -->
+    <header class="hud-header">
+      <h1>Explora <span>el mundo</span></h1>
+      <p>Haz clic en un país para visitarlo</p>
+    </header>
+
+    <!-- Lista de países -->
+    <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Mostrar países" aria-expanded="false" aria-controls="sidebar">☰ Países</button>
+    <aside class="sidebar" id="sidebar">
+      <label class="sidebar__searchbox">
+        <svg class="sidebar__icon" viewBox="0 0 20 20" aria-hidden="true">
+          <circle cx="8.5" cy="8.5" r="5.5" />
+          <path d="M13 13l4 4" />
+        </svg>
+        <input
+          class="sidebar__search"
+          id="search"
+          type="search"
+          placeholder="País, capital, idioma…"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="Buscar país"
+          aria-controls="country-list"
+        />
+        <kbd class="sidebar__kbd">/</kbd>
+      </label>
+      <p class="sidebar__status" id="search-status" aria-live="polite"></p>
+      <div class="sidebar__list" id="country-list"></div>
+    </aside>
+
+    <!-- Panel del país -->
+    <section class="panel" id="panel" aria-hidden="true">
+      <button class="panel__x" id="panel-x" aria-label="Cerrar">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" /></svg>
+      </button>
+      <button class="panel__close" id="panel-close" aria-label="Volver al globo">← Volver al globo</button>
+      <div class="panel__flag" id="panel-flag"></div>
+      <h2 class="panel__name" id="panel-name"></h2>
+      <p class="panel__native" id="panel-native"></p>
+      <span class="panel__tag" id="panel-region"></span>
+      <dl class="panel__facts" id="panel-facts"></dl>
+    </section>
+
+    <!-- Hora de la iluminación -->
+    <div class="clock" id="clock" title="La luz del planeta corresponde a la hora real">
+      <span class="clock__dot"></span>
+      <span>Luz solar en tiempo real</span>
+      <strong id="clock-time"></strong>
+    </div>
+
+    <!-- Créditos -->
+    <div class="credits" id="credits">
+      <div class="credits__card" id="credits-card" role="dialog" aria-label="Créditos" aria-hidden="true" inert>
+        <div class="credits__avatar">
+          <img src="/images/nikocrow.jpg" alt="nikocrow" width="64" height="64" />
+        </div>
+        <div class="credits__info">
+          <strong class="credits__name">nikocrow</strong>
+          <span class="credits__role">Diseño, modelado y desarrollo</span>
+          <a class="credits__link" href="https://nikocrow.dev" target="_blank" rel="noopener">nikocrow.dev <span aria-hidden="true">↗</span></a>
+          <span class="credits__made">Hecho con Three.js</span>
+        </div>
+      </div>
+      <button class="credits__button" id="credits-button" aria-expanded="false" aria-controls="credits-card">Créditos</button>
+    </div>
+
+    <!-- Tooltip -->
+    <div class="tooltip" id="tooltip"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
