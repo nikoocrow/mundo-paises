@@ -23,6 +23,7 @@ public/
   data/world.json         ← 241 países/territorios del mundo (GeoJSON + datos en español)
   data/americas.json      ← fuente de los 54 de América (la usa scripts/build-world.mjs)
 scripts/build-world.mjs   ← genera world.json: América + resto del mundo
+scripts/optimize-glb.mjs  ← comprime la textura de nubes del GLB
 assets-src/textures/      ← texturas fuente con las que se armó el GLB en Blender
 src/
   core/        Experience (orquestador), Camera (vuelos), Renderer, Sizes, Time, Resources
@@ -52,4 +53,13 @@ src/
 ```bash
 npm i --no-save world-atlas@2 topojson-client countries-list world-countries d3-geo-projection
 node scripts/build-world.mjs
+```
+
+## Optimizar el GLB
+
+Tras exportar `earth.glb` desde Blender, la textura de nubes (PNG RGBA de 6 MB, con el color siempre blanco) se reemplaza por un WebP en escala de grises con solo el alfa (~2 MB):
+
+```bash
+npm i --no-save @gltf-transform/core@4 @gltf-transform/extensions@4 sharp
+node scripts/optimize-glb.mjs
 ```

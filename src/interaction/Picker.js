@@ -14,6 +14,10 @@ export default class Picker extends EventEmitter {
     this.countries = countries
     this.raycaster = new THREE.Raycaster()
     this.pointer = new THREE.Vector2()
+    this.ray = new THREE.Ray()
+    this.sphere = new THREE.Sphere()
+    this.inverse = new THREE.Matrix4()
+    this.hit = new THREE.Vector3()
     this.hovered = null
     this.pending = false
     this.down = null
@@ -54,11 +58,16 @@ export default class Picker extends EventEmitter {
   }
 
   pick() {
+    // Intersección analítica con la esfera (en espacio local de la malla): mucho más barata
+    // que recorrer sus ~36 000 triángulos en cada movimiento del puntero
     this.raycaster.setFromCamera(this.pointer, this.experience.camera.instance)
-    const hit = this.raycaster.intersectObject(this.earth.mesh, false)[0]
-    if (!hit?.uv) return null
-    const lon = hit.uv.x * 360 - 180
-    const lat = 90 - hit.uv.y * 180
+    this.earth.mesh.updateWorldMatrix(true, false)
+    this.inverse.copy(this.earth.mesh.matrixWorld).invert()
+    this.ray.copy(this.raycaster.ray).applyMatrix4(this.inverse)
+    this.sphere.radius = this.earth.radius
+    const hit = this.ray.intersectSphere(this.sphere, this.hit)
+    if (!hit) return null
+    const { lon, lat } = this.earth.localToLonLat(hit)
     return this.findCountry(lon, lat)
   }
 

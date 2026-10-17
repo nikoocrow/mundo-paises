@@ -2,6 +2,7 @@ import * as THREE from 'three'
 
 const W = 4096
 const H = 2048
+const PAD = 8 // margen transparente alrededor del país resaltado (cubre el grosor del trazo)
 
 const STYLE = {
   dim: 'rgba(3, 8, 22, 0.42)', // oscurece los océanos para resaltar los países
@@ -10,44 +11,37 @@ const STYLE = {
   selected: { fill: 'rgba(255, 170, 70, 0.38)', stroke: 'rgba(255, 200, 120, 1)', width: 4.5 },
 }
 
+const project = ([lon, lat]) => [((lon + 180) / 360) * W, ((90 - lat) / 180) * H]
+
+function paint(ctx, path, style) {
+  ctx.lineJoin = 'round'
+  ctx.fillStyle = style.fill
+  ctx.fill(path, 'evenodd')
+  ctx.strokeStyle = style.stroke
+  ctx.lineWidth = style.width
+  ctx.stroke(path)
+}
+
 /**
  * Capa de países dibujada en un canvas equirectangular (mismo espacio UV que la textura
  * de la Tierra) y aplicada sobre una copia de la malla del planeta.
+ * La capa base es fija y se sube a la GPU una sola vez; el hover y el seleccionado van en
+ * capas propias recortadas a la caja del país, así cambiar de país solo sube unos pocos píxeles.
  */
 export default class CountryLayer {
   constructor(experience, earth, countries) {
     this.countries = countries
+    this.byIso = new Map(countries.map((f) => [f.properties.iso2, f]))
+    this.paths = new Map(countries.map((f) => [f.properties.iso2, this.buildPath(f.geometry)]))
+    this.anisotropy = experience.renderer.instance.capabilities.getMaxAnisotropy()
+
+    this.texture = this.createTexture(this.drawBase())
+    this.mesh = this.createMesh(earth, new THREE.MeshBasicMaterial({ map: this.texture }), 1)
+
+    this.hover = this.createHighlight(earth, STYLE.hover, 1.1)
+    this.selection = this.createHighlight(earth, STYLE.selected, 1.2)
     this.hovered = null
     this.selected = null
-
-    this.canvas = document.createElement('canvas')
-    this.canvas.width = W
-    this.canvas.height = H
-    this.ctx = this.canvas.getContext('2d')
-
-    this.texture = new THREE.CanvasTexture(this.canvas)
-    this.texture.flipY = false // igual que las texturas del GLB
-    this.texture.colorSpace = THREE.SRGBColorSpace
-    this.texture.anisotropy = experience.renderer.instance.capabilities.getMaxAnisotropy()
-
-    this.paths = new Map(countries.map((f) => [f.properties.iso2, this.buildPath(f.geometry)]))
-
-    const material = new THREE.MeshBasicMaterial({
-      map: this.texture,
-      transparent: true,
-      depthWrite: false,
-      toneMapped: false,
-    })
-    this.mesh = new THREE.Mesh(earth.mesh.geometry, material)
-    this.mesh.scale.setScalar(1.0015)
-    this.mesh.renderOrder = 1
-    earth.mesh.add(this.mesh)
-
-    this.draw()
-  }
-
-  project([lon, lat]) {
-    return [((lon + 180) / 360) * W, ((90 - lat) / 180) * H]
   }
 
   buildPath(geometry) {
@@ -56,7 +50,7 @@ export default class CountryLayer {
     for (const polygon of polygons) {
       for (const ring of polygon) {
         ring.forEach((coord, i) => {
-          const [x, y] = this.project(coord)
+          const [x, y] = project(coord)
           i === 0 ? path.moveTo(x, y) : path.lineTo(x, y)
         })
         path.closePath()
@@ -65,12 +59,12 @@ export default class CountryLayer {
     return path
   }
 
-  /** Capa fija (velo + todos los países en estilo base); se dibuja una sola vez. */
+  /** Capa fija: velo + todos los países en estilo base. */
   drawBase() {
-    this.base = document.createElement('canvas')
-    this.base.width = W
-    this.base.height = H
-    const ctx = this.base.getContext('2d')
+    const canvas = document.createElement('canvas')
+    canvas.width = W
+    canvas.height = H
+    const ctx = canvas.getContext('2d')
 
     // 1. Velo oscuro sobre todo el planeta…
     ctx.fillStyle = STYLE.dim
@@ -83,40 +77,85 @@ export default class CountryLayer {
 
     // 3. Relleno y fronteras de todos los países
     ctx.globalCompositeOperation = 'source-over'
-    ctx.lineJoin = 'round'
-    for (const path of this.paths.values()) this.paint(ctx, path, STYLE.base)
+    for (const path of this.paths.values()) paint(ctx, path, STYLE.base)
+    return canvas
   }
 
-  paint(ctx, path, style) {
-    ctx.fillStyle = style.fill
-    ctx.fill(path, 'evenodd')
-    ctx.strokeStyle = style.stroke
-    ctx.lineWidth = style.width
-    ctx.stroke(path)
+  createTexture(canvas) {
+    const texture = new THREE.CanvasTexture(canvas)
+    texture.flipY = false // igual que las texturas del GLB
+    texture.colorSpace = THREE.SRGBColorSpace
+    texture.anisotropy = this.anisotropy
+    return texture
   }
 
-  draw() {
-    if (!this.base) this.drawBase()
-    const ctx = this.ctx
-    ctx.clearRect(0, 0, W, H)
-    ctx.drawImage(this.base, 0, 0)
+  createMesh(earth, material, renderOrder) {
+    Object.assign(material, { transparent: true, depthWrite: false, toneMapped: false })
+    const mesh = new THREE.Mesh(earth.mesh.geometry, material)
+    mesh.scale.setScalar(1.0015)
+    mesh.renderOrder = renderOrder
+    earth.mesh.add(mesh)
+    return mesh
+  }
 
-    // Países resaltados encima de la capa base (el seleccionado, al final)
-    ctx.lineJoin = 'round'
-    if (this.hovered && this.hovered !== this.selected) this.paint(ctx, this.paths.get(this.hovered), STYLE.hover)
-    if (this.selected) this.paint(ctx, this.paths.get(this.selected), STYLE.selected)
-    this.texture.needsUpdate = true
+  createHighlight(earth, style, renderOrder) {
+    const material = new THREE.MeshBasicMaterial()
+    // Fuera de la caja del país no se dibuja nada (evita que los mipmaps del borde tiñan el globo)
+    material.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment>',
+        `#ifdef USE_MAP
+          if (any(lessThan(vMapUv, vec2(0.0))) || any(greaterThan(vMapUv, vec2(1.0)))) discard;
+        #endif
+        #include <map_fragment>`
+      )
+    }
+    const mesh = this.createMesh(earth, material, renderOrder)
+    mesh.visible = false
+    return { mesh, style, iso: null }
+  }
+
+  /** Dibuja el país `iso` en la capa `layer`, en un canvas del tamaño de su caja. */
+  setLayer(layer, iso) {
+    if (iso === layer.iso) return
+    layer.iso = iso
+    const material = layer.mesh.material
+    material.map?.dispose()
+    material.map = null
+    layer.mesh.visible = !!iso
+    if (!iso) return
+
+    const [minLon, minLat, maxLon, maxLat] = this.byIso.get(iso).properties.bbox
+    // Si la caja cruza el antimeridiano (Rusia, Fiyi…) se usa todo el ancho
+    const [x0, x1] = minLon > maxLon ? [0, W] : [project([minLon, 0])[0], project([maxLon, 0])[0]]
+    const left = Math.max(0, Math.floor(x0) - PAD)
+    const top = Math.max(0, Math.floor(project([0, maxLat])[1]) - PAD)
+    const width = Math.min(W, Math.ceil(x1) + PAD) - left
+    const height = Math.min(H, Math.ceil(project([0, minLat])[1]) + PAD) - top
+
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    ctx.translate(-left, -top)
+    paint(ctx, this.paths.get(iso), layer.style)
+
+    // uv del globo → uv del recorte
+    const texture = this.createTexture(canvas)
+    texture.repeat.set(W / width, H / height)
+    texture.offset.set(-left / width, -top / height)
+    material.map = texture
+    material.needsUpdate = true
   }
 
   setHovered(iso) {
-    if (iso === this.hovered) return
     this.hovered = iso
-    this.draw()
+    this.setLayer(this.hover, iso !== this.selected ? iso : null)
   }
 
   setSelected(iso) {
-    if (iso === this.selected) return
     this.selected = iso
-    this.draw()
+    this.setLayer(this.selection, iso)
+    this.setLayer(this.hover, this.hovered !== iso ? this.hovered : null)
   }
 }

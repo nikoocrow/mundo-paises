@@ -77,6 +77,13 @@ export default class Earth {
     return new THREE.Vector3(r * Math.cos(la) * Math.cos(phi), this.latSign * r * Math.sin(la), r * Math.cos(la) * Math.sin(phi))
   }
 
+  /** Punto en el espacio local de la malla → coordenadas geográficas (inversa de lonLatToLocal). */
+  localToLonLat(p) {
+    const lat = THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp((this.latSign * p.y) / p.length(), -1, 1)))
+    const u = (Math.atan2(p.z, p.x) - this.lonOffset) / (this.lonSign * 2 * Math.PI)
+    return { lon: (u - Math.floor(u)) * 360 - 180, lat }
+  }
+
   lonLatToWorld(lon, lat, altitude = 0) {
     this.mesh.updateWorldMatrix(true, false)
     return this.mesh.localToWorld(this.lonLatToLocal(lon, lat, altitude))
@@ -122,6 +129,14 @@ export default class Earth {
   setupClouds() {
     if (!this.clouds) return
     const m = this.clouds.material
+    // La textura de nubes solo trae el alfa en escala de grises (ver scripts/optimize-glb.mjs)
+    if (m.userData.alphaFromLuminance && m.map) {
+      m.alphaMap = m.map
+      m.alphaMap.colorSpace = THREE.NoColorSpace
+      m.map = null
+      m.color.set(1, 1, 1)
+      m.needsUpdate = true
+    }
     m.transparent = true
     m.depthWrite = false
     m.opacity = 0.9
